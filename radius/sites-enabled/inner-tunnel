@@ -1,0 +1,308 @@
+# -*- text -*-
+
+server inner-tunnel {
+listen {
+       ipaddr = 127.0.0.1
+       port = 18120
+       type = auth
+}
+authorize {
+
+	filter_username
+
+	chap
+
+	mschap
+
+	suffix
+
+
+	update control {
+		&Proxy-To-Realm := LOCAL
+	}
+
+
+	eap {
+		ok = return
+	}
+
+	#
+	#  Look in an SQL database.  The schema of the database
+	#  is meant to mirror the "users" file.
+	#
+	#  See "Authorization Queries" in sql.conf
+	-sql
+
+
+
+
+#	daily
+
+	expiration
+	logintime
+
+	pap
+}
+
+
+#  Authentication.
+#
+#
+#  This section lists which modules are available for authentication.
+#  Note that it does NOT mean 'try each module in order'.  It means
+#  that a module from the 'authorize' section adds a configuration
+#  attribute 'Auth-Type := FOO'.  That authentication type is then
+#  used to pick the appropriate module from the list below.
+#
+
+#  In general, you SHOULD NOT set the Auth-Type attribute.  The server
+#  will figure it out on its own, and will do the right thing.  The
+#  most common side effect of erroneously setting the Auth-Type
+#  attribute is that one authentication method will work, but the
+#  others will not.
+#
+#  The common reasons to set the Auth-Type attribute by hand
+#  is to either forcibly reject the user, or forcibly accept him.
+#
+authenticate {
+	#
+	#  PAP authentication, when a back-end database listed
+	#  in the 'authorize' section supplies a password.  The
+	#  password can be clear-text, or encrypted.
+	Auth-Type PAP {
+		pap
+	}
+
+	#
+	#  Most people want CHAP authentication
+	#  A back-end database listed in the 'authorize' section
+	#  MUST supply a CLEAR TEXT password.  Encrypted passwords
+	#  won't work.
+	Auth-Type CHAP {
+		chap
+	}
+
+	#
+	#  MSCHAP authentication.
+	Auth-Type MS-CHAP {
+		mschap
+	}
+
+	#
+	#  For old names, too.
+	#
+	mschap
+
+	#
+	#  Pluggable Authentication Modules.
+#	pam
+
+	# Uncomment it if you want to use ldap for authentication
+	#
+	# Note that this means "check plain-text password against
+	# the ldap database", which means that EAP won't work,
+	# as it does not supply a plain-text password.
+	#
+	#  We do NOT recommend using this.  LDAP servers are databases.
+	#  They are NOT authentication servers.  FreeRADIUS is an
+	#  authentication server, and knows what to do with authentication.
+	#  LDAP servers do not.
+	#
+#	Auth-Type LDAP {
+#		ldap
+#	}
+
+	#
+	#  Allow EAP authentication.
+	eap
+}
+
+######################################################################
+#
+#	There are no accounting requests inside of EAP-TTLS or PEAP
+#	tunnels.
+#
+######################################################################
+
+
+#  Session database, used for checking Simultaneous-Use. Either the radutmp
+#  or rlm_sql module can handle this.
+#  The rlm_sql module is *much* faster
+session {
+	radutmp
+
+	#
+	#  See "Simultaneous Use Checking Queries" in sql.conf
+#	sql
+}
+
+
+#  Post-Authentication
+#  Once we KNOW that the user has been authenticated, there are
+#  additional steps we can take.
+#
+#  Note that the last packet of the inner-tunnel authentication
+#  MAY NOT BE the last packet of the outer session.  So updating
+#  the outer reply MIGHT work, and sometimes MIGHT NOT.  The
+#  exact functionality depends on both the inner and outer
+#  authentication methods.
+#
+#  If you need to send a reply attribute in the outer session,
+#  the ONLY safe way is to set "use_tunneled_reply = yes", and
+#  then update the inner-tunnel reply.
+post-auth {
+	#  If you want privacy to remain, see the
+	#  Chargeable-User-Identity attribute from RFC 4372.
+	#  If you want to use it just uncomment the line below.
+#       cui-inner
+
+	#
+	#  If you want the Access-Accept to contain the inner
+	#  User-Name, uncomment the following lines.
+	#
+#	update outer.session-state {
+#	       User-Name := &User-Name
+#	}
+
+	#
+	#  If you want to have a log of authentication replies,
+	#  un-comment the following line, and enable the
+	#  'detail reply_log' module.
+#	reply_log
+
+	#
+	#  After authenticating the user, do another SQL query.
+	#
+	#  See "Authentication Logging Queries" in sql.conf
+	-sql
+
+	#
+	#  Un-comment the following if you have set
+	#  'edir_account_policy_check = yes' in the ldap module sub-section of
+	#  the 'modules' section.
+	#
+#	ldap
+
+
+	#
+	#  Un-comment the following if you want to generate Moonshot (ABFAB) TargetedIds
+	#
+	#  IMPORTANT: This requires the UUID package to be installed, and a targeted_id_salt
+	#             to be configured.
+	#
+	#  This functionality also supports SQL backing. To use this functionality, enable
+	#  and configure the moonshot-targeted-ids SQL module in the mods-enabled directory.
+	#  Then remove the comments from the appropriate lines in each of the below
+	#  policies in the policy.d/moonshot-targeted-ids file.
+	#
+#	moonshot_host_tid
+#	moonshot_realm_tid
+#	moonshot_coi_tid
+
+	#
+	#  Instead of "use_tunneled_reply", change this "if (0)" to an
+	#  "if (1)".
+	#
+	if (0) {
+		#
+		#  These attributes are for the inner-tunnel only,
+		#  and MUST NOT be copied to the outer reply.
+		#
+		update reply {
+			User-Name !* ANY
+			Message-Authenticator !* ANY
+			EAP-Message !* ANY
+			Proxy-State !* ANY
+			MS-MPPE-Encryption-Types !* ANY
+			MS-MPPE-Encryption-Policy !* ANY
+			MS-MPPE-Send-Key !* ANY
+			MS-MPPE-Recv-Key !* ANY
+		}
+
+		#
+		#  Copy the inner reply attributes to the outer
+		#  session-state list.  The post-auth policy will take
+		#  care of copying the outer session-state list to the
+		#  outer reply.
+		#
+		update {
+			&outer.session-state: += &reply:
+		}
+	}
+
+	#
+	#  Access-Reject packets are sent through the REJECT sub-section of the
+	#  post-auth section.
+	#
+	#  Add the ldap module name (or instance) if you have set
+	#  'edir_account_policy_check = yes' in the ldap module configuration
+	#
+	Post-Auth-Type REJECT {
+		# log failed authentications in SQL, too.
+		-sql
+		attr_filter.access_reject
+
+		#
+		#  Let the outer session know which module failed, and why.
+		#
+		update outer.session-state {
+			&Module-Failure-Message := &request:Module-Failure-Message
+		}
+	}
+}
+
+#
+#  When the server decides to proxy a request to a home server,
+#  the proxied request is first passed through the pre-proxy
+#  stage.  This stage can re-write the request, or decide to
+#  cancel the proxy.
+#
+#  Only a few modules currently have this method.
+#
+pre-proxy {
+	#  Uncomment the following line if you want to change attributes
+	#  as defined in the preproxy_users file.
+#	files
+
+	#  Uncomment the following line if you want to filter requests
+	#  sent to remote servers based on the rules defined in the
+	#  'attrs.pre-proxy' file.
+#	attr_filter.pre-proxy
+
+	#  If you want to have a log of packets proxied to a home
+	#  server, un-comment the following line, and the
+	#  'detail pre_proxy_log' section, above.
+#	pre_proxy_log
+}
+
+#
+#  When the server receives a reply to a request it proxied
+#  to a home server, the request may be massaged here, in the
+#  post-proxy stage.
+#
+post-proxy {
+
+	#  If you want to have a log of replies from a home server,
+	#  un-comment the following line, and the 'detail post_proxy_log'
+	#  section, above.
+#	post_proxy_log
+
+	#  Uncomment the following line if you want to filter replies from
+	#  remote proxies based on the rules defined in the 'attrs' file.
+#	attr_filter.post-proxy
+
+	#
+	#  If you are proxying LEAP, you MUST configure the EAP
+	#  module, and you MUST list it here, in the post-proxy
+	#  stage.
+	#
+	#  You MUST also use the 'nostrip' option in the 'realm'
+	#  configuration.  Otherwise, the User-Name attribute
+	#  in the proxied request will not match the user name
+	#  hidden inside of the EAP packet, and the end server will
+	#  reject the EAP request.
+	#
+	eap
+}
+
+} # inner-tunnel server block

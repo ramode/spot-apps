@@ -1,0 +1,156 @@
+
+
+server hotspot {
+status_server = yes
+
+listen {
+	ipaddr = *
+	type = auth
+	port = 1812
+}
+
+listen {
+	ipaddr = *
+	port = 1813
+	type = acct
+
+}
+
+authorize {
+	filter_username
+	preprocess
+	cui
+	chap
+	mschap
+
+	suffix
+	eap {
+		ok = return
+		updated = return
+	}
+
+	-sql
+
+#	daily
+	expiration
+	logintime
+	pap
+}
+
+authenticate {
+	Auth-Type PAP {
+		pap
+	}
+	Auth-Type CHAP {
+		chap
+	}
+
+	Auth-Type MS-CHAP {
+		mschap
+	}
+
+	mschap
+	eap
+
+#	Auth-Type eap {
+#		eap {
+#			handled = 1
+#		}
+#		if (handled && (Response-Packet-Type == Access-Challenge)) {
+#			attr_filter.access_challenge.post-auth
+#			handled  # override the "updated" code from attr_filter
+#		}
+#	}
+}
+
+
+#
+#  Pre-accounting.  Decide which accounting type to use.
+#
+preacct {
+	preprocess
+
+	acct_counters64
+
+	update request {
+	  	&FreeRADIUS-Acct-Session-Start-Time = "%{expr: %l - %{%{Acct-Session-Time}:-0} - %{%{Acct-Delay-Time}:-0}}"
+	}
+
+	acct_unique
+
+	suffix
+}
+
+accounting {
+	-sql
+
+	attr_filter.accounting_response
+}
+
+
+session {
+	sql
+}
+
+
+post-auth {
+#	if (!&reply:State) {
+#		update reply {
+#			State := "0x%{randstr:16h}"
+#		}
+#	}
+
+	#
+	#  For EAP-TTLS and PEAP, add the cached attributes to the reply.
+	#  The "session-state" attributes are automatically cached when
+	#  an Access-Challenge is sent, and automatically retrieved
+	#  when an Access-Request is received.
+	#
+	#  The session-state attributes are automatically deleted after
+	#  an Access-Reject or Access-Accept is sent.
+	#
+	#  If both session-state and reply contain a User-Name attribute, remove
+	#  the one in the reply if it is just a copy of the one in the request, so
+	#  we don't end up with two User-Name attributes.
+
+	if (session-state:User-Name && reply:User-Name && request:User-Name && (reply:User-Name == request:User-Name)) {
+		update reply {
+			&User-Name !* ANY
+		}
+	}
+	update {
+		&reply: += &session-state:
+	}
+
+
+	-sql
+
+#	insert_acct_class
+
+	if (&reply:EAP-Session-Id) {
+		update reply {
+			EAP-Key-Name := &reply:EAP-Session-Id
+		}
+	}
+	remove_reply_message_if_eap
+	Post-Auth-Type REJECT {
+		-sql
+		eap
+		remove_reply_message_if_eap
+	}
+
+	Post-Auth-Type Challenge {
+#		remove_reply_message_if_eap
+#		attr_filter.access_challenge.post-auth
+	}
+
+}
+
+pre-proxy {
+
+}
+
+post-proxy {
+	eap
+}
+}
