@@ -30,7 +30,7 @@ server coa {
 		#  "IPASS" or "ntdomain", as the proxying is based on
 		#  the Operator-Name attribute.  It contains the realm,
 		#  and ONLY the realm (prefixed by a '1')
-		suffix
+
 
 		#  Insert your own policies here.
 		ok

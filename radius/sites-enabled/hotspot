@@ -1,0 +1,78 @@
+
+
+server hotspot {
+status_server = yes
+
+listen {
+	ipaddr = *
+	type = auth
+	port = 1812
+}
+
+listen {
+	ipaddr = *
+	port = 1813
+	type = acct
+
+}
+
+authorize {
+	chap
+	mschap
+	sql_hotspot
+	pap
+	debug_all
+}
+
+authenticate {
+	Auth-Type PAP {
+		pap
+	}
+	Auth-Type CHAP {
+		chap
+	}
+
+	Auth-Type MS-CHAP {
+		mschap
+	}
+	mschap
+}
+
+
+preacct {
+	acct_counters64
+	update request {
+	  	&FreeRADIUS-Acct-Session-Start-Time = "%{expr: %l - %{%{Acct-Session-Time}:-0} - %{%{Acct-Delay-Time}:-0}}"
+	}
+	debug_all
+}
+
+accounting {
+	sql_hotspot.accounting
+}
+
+
+session {
+	sql_hotspot
+}
+
+
+post-auth {
+	if (!&reply:State) {
+		update reply {
+			&State := "0x%{randstr:16h}"
+		}
+	}
+	insert_acct_class
+	
+	sql_hotspot
+}
+
+pre-proxy {
+
+}
+
+post-proxy {
+
+}
+}
